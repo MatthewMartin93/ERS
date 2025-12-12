@@ -1,11 +1,11 @@
 /**
- ERS_LAN.pde
+ ERS_LAN_Fixed.pde
  Egyptian Rat Screw — LAN multiplayer (host/client)
- Processing 4.3 single-file sketch.
+ Processing 4.3 single-file sketch — fixed and complete.
 
  - Run on two machines.
  - One machine: choose "Host" and Start Host.
- - Other machine: choose "Client", enter host IP, Connect.
+ - Other machine: choose "Client", click the IP box, type host IP, press Enter or Connect.
  - Host is authoritative.
  - Controls:
     Host (Player 1): Flip A, Slap S
@@ -53,9 +53,14 @@ AnimationManager anim;
 FadingText resultText;
 
 // ---- UI connection panel ----
-String mode = "Idle"; // "Idle", "Host", "Client", "Running"
+String mode = "Idle"; // "Idle", "Host", "Client"
 String inputIP = "";
 String connectionStatus = "Not connected";
+
+// typing state for IP box (click-to-type)
+boolean typingIP = false;
+int ipBoxX = 20, ipBoxY = 218, ipBoxW = 140, ipBoxH = 22;
+int blinkFrame = 0;
 
 // ---- CPU option for single-machine testing ----
 boolean cpuModeLocal = false;
@@ -99,6 +104,8 @@ void initHostState() {
 void resetLocalState() {
   localPile.clear(); localP1.clear(); localP2.clear();
   localP1Turn = true; localGameOver = false;
+  inputIP = "";
+  typingIP = false;
 }
 
 // ---------- draw ----------
@@ -145,6 +152,9 @@ void draw() {
 
   // CPU for testing when running single-machine host
   if (isHost && cpuModeLocal && !anim.isBusy()) handleCPUHost();
+
+  // blinking cursor timer
+  blinkFrame = (blinkFrame + 1) % 60;
 }
 
 // ---------- connection panel ----------
@@ -174,7 +184,22 @@ void drawConnectionPanel() {
 
   // client UI
   text("Connect to host IP:", 20, 198);
-  inputIP = drawTextField(inputIP, 20, 218, 140, 22);
+
+  // draw the interactive text box
+  if (typingIP) stroke(255, 255, 120); else stroke(120);
+  fill(255);
+  rect(ipBoxX, ipBoxY, ipBoxW, ipBoxH, 4);
+  noStroke();
+  fill(0);
+  textAlign(LEFT, CENTER);
+  textSize(12);
+  String showText = inputIP;
+  if (typingIP && (blinkFrame < 30)) {
+    // show blinking caret
+    showText = inputIP + "|";
+  }
+  text(showText, ipBoxX + 6, ipBoxY + ipBoxH/2);
+
   if (!isClient) {
     if (drawButton("Connect", 20, 250, 66, 26)) {
       startClient(inputIP);
@@ -186,6 +211,8 @@ void drawConnectionPanel() {
   }
 
   // small controls
+  fill(255);
+  textSize(12);
   text("Controls (Host=Player1, Client=Player2):", 20, 294);
   text("Host Flip A   Slap S   R restart", 20, 314);
   text("Client Flip L  Slap K", 20, 334);
@@ -198,16 +225,6 @@ void drawConnectionPanel() {
   // port info
   text("Port: " + NET_PORT, 20, 410);
   text("Local IP: " + getLocalIP(), 20, 432);
-}
-
-// simple text field drawing (click to focus not implemented; just typed)
-String drawTextField(String val, int x, int y, int w, int h) {
-  fill(255);
-  rect(x, y, w, h, 4);
-  fill(0);
-  textAlign(LEFT, CENTER);
-  text(val, x+6, y + h/2);
-  return val;
 }
 
 // simple button: draws and returns true if clicked
@@ -341,6 +358,12 @@ void drawCardBack() {
 
 // ---------- input handling ----------
 void keyPressed() {
+  // If the IP box is focused, handle typing first
+  if (typingIP) {
+    handleIPTyping(key, keyCode);
+    return;
+  }
+
   if (key == 'r' || key == 'R') {
     if (isHost) {
       initHostState();
@@ -370,6 +393,34 @@ void keyPressed() {
     } else if ((key == 'K' || key == 'k')) {
       sendClientAction("SLAP");
     }
+  }
+}
+
+// IP typing handler (click to focus, digits/dot/backspace/enter)
+void handleIPTyping(char k, int kcode) {
+  if (kcode == BACKSPACE) {
+    if (inputIP.length() > 0) inputIP = inputIP.substring(0, inputIP.length()-1);
+    return;
+  }
+  if (kcode == ENTER || kcode == RETURN) {
+    // attempt to connect
+    startClient(inputIP.trim());
+    typingIP = false;
+    return;
+  }
+  // allow numbers, dots, and colon (port) and digits and letters for IPv6 (but keep simple)
+  if ((k >= '0' && k <= '9') || k == '.' || k == ':' || (k >= 'A' && k <= 'Z') || (k >= 'a' && k <= 'z')) {
+    if (inputIP.length() < 64) inputIP += k;
+  }
+}
+
+// mouse press to focus ip box or click UI
+void mousePressed() {
+  // check ip box
+  if (mouseX >= ipBoxX && mouseX <= ipBoxX + ipBoxW && mouseY >= ipBoxY && mouseY <= ipBoxY + ipBoxH) {
+    typingIP = true;
+  } else {
+    typingIP = false;
   }
 }
 
@@ -467,6 +518,7 @@ void startHost() {
     clientID = -1;
     // host uses host state already created
     copyToLocal();
+    // Send initial state periodically? host will broadcast after each action
   } catch (Exception e) {
     connectionStatus = "Failed to start server: " + e.getMessage();
   }
@@ -548,22 +600,22 @@ void handleNetMessageFromClient(Client c, String msg) {
 void handleNetMessageFromHost(String s) {
   // host will periodically send STATE messages terminated by newline.
   // Format:
-  // STATE|p1DeckCSV|p2DeckCSV|pileCSV|turn|msg
+  // STATE|p1DeckCSV|p2DeckCSV|pileCSV|turn|over|msg
   s = s.trim();
   if (s.length() == 0) return;
   if (s.startsWith("STATE|")) {
     String body = s.substring(6);
     String[] parts = split(body, '|');
-    // Expect 5 parts
-    if (parts.length >= 5) {
+    // Expect at least 6 parts
+    if (parts.length >= 6) {
       localP1 = parseDeckCSV(parts[0]);
       localP2 = parseDeckCSV(parts[1]);
       localPile = parseDeckCSV(parts[2]);
       localP1Turn = parts[3].equals("1");
       localGameOver = parts[4].equals("1");
-      if (parts.length >= 6) localMsg = parts[5];
-      copyToLocal(); // ensure animations sync check uses local arrays
-      // optionally trigger animations for any visible changes? We do minimal: rely on anim overlay from host state broadcast
+      localMsg = parts[5];
+      // no direct animation triggers from incoming state — animations are triggered on host and broadcast
+      copyToLocal(); // ensure local arrays set for rendering
     }
     return;
   } else if (s.equals("WELCOME")) {
@@ -588,8 +640,6 @@ void sendStateToAll() {
   String stateMsg = "STATE|" + s1 + "|" + s2 + "|" + s3 + "|" + turn + "|" + over + "|" + msg + "\n";
   // send to all clients
   if (netServer != null) {
-    // netServer.clients() not exposed — we iterate known connections by calling netServer.available repeatedly
-    // But processing.net doesn't provide a direct list, so we broadcast by sending to server's clients via Server.write()
     netServer.write(stateMsg);
   }
   // also update local copies so the host UI sees the same
@@ -718,7 +768,8 @@ void handleCPUHost() {
   }
 }
 
-// ---------- Animation & helper classes (same as earlier single-file) ----------
+// ---------- Animation & helper classes (complete) ----------
+
 // FadingText class
 class FadingText {
   String txt = "";
@@ -845,12 +896,17 @@ class AnimationManager {
 
 class AnimatedCard {
   Card card; PVector from,to; int framesTotal, frame; boolean finished=false; Runnable onFinish=null; boolean isFlip=false;
-  AnimatedCard(Card c, PVector from, PVector to, int frames) { this.card=c; this.from=from; this.to=to; this.framesTotal=frames; this.frame=0; }
+  // rotation offset per flip
+  float rotOffset = 0;
+  AnimatedCard(Card c, PVector from, PVector to, int frames) {
+    this.card=c; this.from=from; this.to=to; this.framesTotal=frames; this.frame=0;
+    this.rotOffset = random(-12,12);
+  }
   void update() { frame++; if (frame >= framesTotal) finished=true; }
   void draw() {
     float t = (float)frame / (float)framesTotal; t = easeOutCubic(t);
     float x = lerp(from.x, to.x, t); float y = lerp(from.y, to.y, t);
-    float rotMax = 8; float rot = rotMax * (1 - t) * (sin(t*PI*2) * 0.5);
+    float rot = lerp(rotOffset, 0, t);
     float s = 0.98 + 0.05 * sin(t * PI);
     card.drawTransformed(x, y, CARD_W, CARD_H, rot, s);
   }
@@ -863,8 +919,12 @@ class SlapAnimation {
   void update() { f++; if (f >= totalFrames) finished=true; }
   PVector getCurrentShake() {
     if (f < 6) { float p=(float)f/6.0; return new PVector(0, -10 + 10*(1-p)); }
-    else if (f < 20) { float mag = valid ? 6 : 12; float x = sin(map(f,6,20,0,PI*6)) * mag * (1 - (float)(f-6)/14.0 * 0.5); float y = cos(map(f,6,20,0,PI*6)) * (mag/3.0); return new PVector(x,y); }
-    else return new PVector(0,0);
+    else if (f < 20) {
+      float mag = valid ? 6 : 12;
+      float x = sin(map(f,6,20,0,PI*6)) * mag * (1 - (float)(f-6)/14.0 * 0.5);
+      float y = cos(map(f,6,20,0,PI*6)) * (mag/3.0);
+      return new PVector(x,y);
+    } else return new PVector(0,0);
   }
   void draw() {
     pushMatrix();
@@ -877,7 +937,8 @@ class SlapAnimation {
     noStroke(); fill(255, 255, 255, alpha);
     float scaleHand = 1.0 + 0.08 * sin(f*0.4);
     pushMatrix(); scale(scaleHand);
-    beginShape(); vertex(-40, -20); vertex(-30, -30); vertex(-20, -28); vertex(-10, -38); vertex(0, -30); vertex(10, -32); vertex(20, -20); vertex(40, -10); vertex(20, 20); vertex(-20, 30); endShape(CLOSE);
+    beginShape(); vertex(-40, -20); vertex(-30, -30); vertex(-20, -28); vertex(-10, -38);
+    vertex(0, -30); vertex(10, -32); vertex(20, -20); vertex(40, -10); vertex(20, 20); vertex(-20, 30); endShape(CLOSE);
     popMatrix();
     fill(255,255,255, alpha/3); ellipse(0, -10, 140 + f*0.2, 60 + f*0.2);
     popMatrix();
@@ -909,3 +970,23 @@ class CollectAnimation {
   float easeOutQuad(float x) { return 1 - (1-x)*(1-x); }
 }
 
+// ---------- Game logic helpers ----------
+boolean checkDoubleHost2(ArrayList<Card> deckcheck) {
+  if (deckcheck.size() < 2) return false;
+  return deckcheck.get(deckcheck.size()-1).rankValue == deckcheck.get(deckcheck.size()-2).rankValue;
+}
+
+// ---------- helpers: conversion ----------
+String deckToCSVLocal(ArrayList<Card> arr) {
+  if (arr == null || arr.size() == 0) return "";
+  String[] parts = new String[arr.size()];
+  for (int i=0;i<arr.size();i++) {
+    Card c = arr.get(i);
+    parts[i] = c.rank + c.suit;
+  }
+  return join(parts, ',');
+}
+
+// ---------- misc ----------
+
+// ---------- End of file ----------
