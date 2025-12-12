@@ -638,6 +638,7 @@ void sendStateToAll() {
   String msg = "OK";
   // full message:
   String stateMsg = "STATE|" + s1 + "|" + s2 + "|" + s3 + "|" + turn + "|" + over + "|" + msg + "\n";
+  System.out.println(stateMsg);
   // send to all clients
   if (netServer != null) {
     netServer.write(stateMsg);
