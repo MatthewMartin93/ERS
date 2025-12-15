@@ -598,38 +598,55 @@ void handleNetMessageFromClient(Client c, String msg) {
 
 // ---------- networking: handling host messages on client ----------
 void handleNetMessageFromHost(String s) {
-  // host will periodically send STATE messages terminated by newline.
-  // Format:
-  // STATE|p1DeckCSV|p2DeckCSV|pileCSV|turn|over|msg
   s = s.trim();
   if (s.length() == 0) return;
 
-  if (s.startsWith("STATE|")) {
-    String body = s.substring(6);
-    String[] parts = split(body, '|');
+  if (!s.startsWith("STATE|")) return;
 
-    // Expect at least 6 parts
-    if (parts.length >= 6) {
-      localP1 = parseDeckCSV(parts[0]);
-      localP2 = parseDeckCSV(parts[1]);
-      localPile = parseDeckCSV(parts[2]);
-      localP1Turn = parts[3].equals("1");
-      localGameOver = parts[4].equals("1");
-      localMsg = parts[5];
-      // ✅ DO NOT call copyToLocal() on the client
-    }
-    return;
+  String body = s.substring(6);
+  String[] parts = split(body, '|');
+  if (parts.length < 6) return;
 
-  } else if (s.equals("WELCOME")) {
-    connectionStatus = "Welcome from host";
-    return;
+  ArrayList<Card> newP1   = parseDeckCSV(parts[0]);
+  ArrayList<Card> newP2   = parseDeckCSV(parts[1]);
+  ArrayList<Card> newPile = parseDeckCSV(parts[2]);
+  boolean newTurn         = parts[3].equals("1");
+  boolean newOver         = parts[4].equals("1");
+  localMsg                = parts[5];
 
-  } else {
-    // other messages
-    println("Msg from host: " + s);
+  /* ---------- CLIENT-SIDE ANIMATION DETECTION ---------- */
+
+  // 1️⃣ FLIP animation (pile grew by exactly 1)
+  if (newPile.size() == localPile.size() + 1) {
+    Card c = newPile.get(newPile.size() - 1);
+
+    // who flipped?
+    int flipper = newTurn ? 2 : 1;
+
+    PVector start = getTopOfDeckPosition(flipper);
+    PVector end   = getPileTopPosition();
+
+    anim.startFlipAnimation(c.copy(), start, end, null);
   }
-}
 
+  // 2️⃣ COLLECT animation (pile emptied)
+  if (localPile.size() > 0 && newPile.size() == 0) {
+    resultText.show("COLLECT!", color(200, 240, 200));
+  }
+
+  // 3️⃣ SLAP shake (pile size unchanged but turn changed)
+  if (newPile.size() == localPile.size() && newTurn != localP1Turn) {
+    anim.startSlapAnimation(newTurn ? 2 : 1, true, null);
+  }
+
+  /* ---------- APPLY STATE ---------- */
+
+  localP1 = newP1;
+  localP2 = newP2;
+  localPile = newPile;
+  localP1Turn = newTurn;
+  localGameOver = newOver;
+}
 
 // ---------- send state (host broadcasts) ----------
 void sendStateToAll() {
