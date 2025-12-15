@@ -603,9 +603,11 @@ void handleNetMessageFromHost(String s) {
   // STATE|p1DeckCSV|p2DeckCSV|pileCSV|turn|over|msg
   s = s.trim();
   if (s.length() == 0) return;
+
   if (s.startsWith("STATE|")) {
     String body = s.substring(6);
     String[] parts = split(body, '|');
+
     // Expect at least 6 parts
     if (parts.length >= 6) {
       localP1 = parseDeckCSV(parts[0]);
@@ -614,18 +616,20 @@ void handleNetMessageFromHost(String s) {
       localP1Turn = parts[3].equals("1");
       localGameOver = parts[4].equals("1");
       localMsg = parts[5];
-      // no direct animation triggers from incoming state — animations are triggered on host and broadcast
-      copyToLocal(); // ensure local arrays set for rendering
+      // ✅ DO NOT call copyToLocal() on the client
     }
     return;
+
   } else if (s.equals("WELCOME")) {
     connectionStatus = "Welcome from host";
     return;
+
   } else {
     // other messages
     println("Msg from host: " + s);
   }
 }
+
 
 // ---------- send state (host broadcasts) ----------
 void sendStateToAll() {
